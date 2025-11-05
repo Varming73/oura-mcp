@@ -1,14 +1,18 @@
 {
-  "name": "@varming73/oura-mcp",
+  "name": "oura-mcp-varming",
   "version": "1.0.0",
   "main": "build/index.js",
-  "keywords": ["mcp", "oura", "model-context-protocol"],
+  "keywords": [
+    "mcp",
+    "oura",
+    "model-context-protocol"
+  ],
   "author": "Varming73",
   "license": "ISC",
   "description": "MCP server for Oura Ring API",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Varming73/oura-mcp.git"
+    "url": "git+https://github.com/Varming73/oura-mcp.git"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.7.0",
@@ -24,7 +28,7 @@
   },
   "type": "module",
   "bin": {
-    "oura-mcp": "./build/index.js"
+    "oura-mcp": "build/index.js"
   },
   "scripts": {
     "build": "tsc && chmod 755 build/index.js",
