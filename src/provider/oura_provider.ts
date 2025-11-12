@@ -9,9 +9,43 @@ export interface OuraConfig {
   redirectUri?: string;
 }
 
+interface OuraResponse {
+  data: unknown[];
+  next_token?: string;
+}
+
+interface EndpointConfig {
+  name: string;
+  requiresDates: boolean;
+  description: string;
+}
+
 export class OuraProvider {
   private server: McpServer;
   private auth: OuraAuth;
+
+  // Configuration constants
+  private static readonly DEFAULT_DAYS_LOOKBACK = 7;
+  private static readonly MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+  // Oura API endpoints configuration
+  private static readonly ENDPOINTS: EndpointConfig[] = [
+    { name: 'personal_info', requiresDates: false, description: 'User profile information including age, weight, height, and biological sex' },
+    { name: 'daily_activity', requiresDates: true, description: 'Daily activity summaries including steps, calories, and active time' },
+    { name: 'daily_readiness', requiresDates: true, description: 'Daily readiness scores and contributing factors' },
+    { name: 'daily_sleep', requiresDates: true, description: 'Daily sleep summaries including duration, efficiency, and sleep stages' },
+    { name: 'sleep', requiresDates: true, description: 'Detailed sleep data with per-minute heart rate and HRV measurements' },
+    { name: 'sleep_time', requiresDates: true, description: 'Sleep timing data including bedtime and wake time recommendations' },
+    { name: 'workout', requiresDates: true, description: 'Workout session data including intensity, duration, and heart rate zones' },
+    { name: 'session', requiresDates: true, description: 'Tagged session data for activities like meditation or breathing exercises' },
+    { name: 'daily_spo2', requiresDates: true, description: 'Daily blood oxygen saturation (SpO2) measurements' },
+    { name: 'rest_mode_period', requiresDates: true, description: 'Rest mode periods when user has paused activity tracking' },
+    { name: 'ring_configuration', requiresDates: false, description: 'Ring hardware configuration and settings' },
+    { name: 'daily_stress', requiresDates: true, description: 'Daily stress levels and daytime stress measurements' },
+    { name: 'daily_resilience', requiresDates: true, description: 'Daily resilience metrics reflecting recovery capacity' },
+    { name: 'daily_cardiovascular_age', requiresDates: true, description: 'Daily cardiovascular age estimates based on fitness data' },
+    { name: 'vO2_max', requiresDates: true, description: 'VO2 max measurements indicating cardiovascular fitness level' }
+  ];
 
   constructor(config: OuraConfig) {
     this.auth = new OuraAuth(
@@ -38,8 +72,13 @@ export class OuraProvider {
     if (!dateRegex.test(date)) {
       return false;
     }
-    const parsedDate = new Date(date);
-    return parsedDate instanceof Date && !isNaN(parsedDate.getTime());
+    // Parse the date and verify it matches the input (catches Feb 30, Apr 31, etc.)
+    const parsedDate = new Date(date + 'T00:00:00');
+    if (isNaN(parsedDate.getTime())) {
+      return false;
+    }
+    // Ensure the parsed date matches the input string (e.g., "2024-02-30" becomes "2024-03-02")
+    return parsedDate.toISOString().split('T')[0] === date;
   }
 
   private validateDateRange(startDate: string, endDate: string): void {
@@ -54,7 +93,7 @@ export class OuraProvider {
     }
   }
 
-  private async fetchOuraData(endpoint: string, params?: Record<string, string>): Promise<any> {
+  private async fetchOuraData(endpoint: string, params?: Record<string, string>): Promise<OuraResponse> {
     const headers = await this.auth.getHeaders();
     const url = new URL(`${this.auth.getBaseUrl()}/usercollection/${endpoint}`);
 
@@ -83,27 +122,8 @@ export class OuraProvider {
       endDate: z.string().describe('End date in YYYY-MM-DD format (e.g., 2024-01-31)')
     };
 
-    // Add resources and tools for each endpoint
-    const endpoints = [
-      { name: 'personal_info', requiresDates: false, description: 'User profile information including age, weight, height, and biological sex' },
-      { name: 'daily_activity', requiresDates: true, description: 'Daily activity summaries including steps, calories, and active time' },
-      { name: 'daily_readiness', requiresDates: true, description: 'Daily readiness scores and contributing factors' },
-      { name: 'daily_sleep', requiresDates: true, description: 'Daily sleep summaries including duration, efficiency, and sleep stages' },
-      { name: 'sleep', requiresDates: true, description: 'Detailed sleep data with per-minute heart rate and HRV measurements' },
-      { name: 'sleep_time', requiresDates: true, description: 'Sleep timing data including bedtime and wake time recommendations' },
-      { name: 'workout', requiresDates: true, description: 'Workout session data including intensity, duration, and heart rate zones' },
-      { name: 'session', requiresDates: true, description: 'Tagged session data for activities like meditation or breathing exercises' },
-      { name: 'daily_spo2', requiresDates: true, description: 'Daily blood oxygen saturation (SpO2) measurements' },
-      { name: 'rest_mode_period', requiresDates: true, description: 'Rest mode periods when user has paused activity tracking' },
-      { name: 'ring_configuration', requiresDates: false, description: 'Ring hardware configuration and settings' },
-      { name: 'daily_stress', requiresDates: true, description: 'Daily stress levels and daytime stress measurements' },
-      { name: 'daily_resilience', requiresDates: true, description: 'Daily resilience metrics reflecting recovery capacity' },
-      { name: 'daily_cardiovascular_age', requiresDates: true, description: 'Daily cardiovascular age estimates based on fitness data' },
-      { name: 'vO2_max', requiresDates: true, description: 'VO2 max measurements indicating cardiovascular fitness level' }
-    ];
-
     // Add resources
-    endpoints.forEach(({ name, requiresDates, description }) => {
+    OuraProvider.ENDPOINTS.forEach(({ name, requiresDates, description }) => {
       this.server.resource(
         name,
         `oura://${name}`,
@@ -114,9 +134,11 @@ export class OuraProvider {
         async (uri: URL) => {
           let data;
           if (requiresDates) {
-            // For date-based resources, fetch last 7 days by default
+            // For date-based resources, fetch last N days by default
             const endDate = new Date().toISOString().split('T')[0];
-            const startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            const startDate = new Date(
+              Date.now() - OuraProvider.DEFAULT_DAYS_LOOKBACK * OuraProvider.MS_PER_DAY
+            ).toISOString().split('T')[0];
             data = await this.fetchOuraData(name, { start_date: startDate, end_date: endDate });
           } else {
             data = await this.fetchOuraData(name);
@@ -134,7 +156,7 @@ export class OuraProvider {
     });
 
     // Add tools
-    endpoints.filter(e => e.requiresDates).forEach(({ name, description }) => {
+    OuraProvider.ENDPOINTS.filter(e => e.requiresDates).forEach(({ name, description }) => {
       this.server.tool(
         `get_${name}`,
         `Retrieves ${description.toLowerCase()} for a specified date range from Oura Ring API`,
