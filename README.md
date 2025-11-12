@@ -112,4 +112,72 @@ Restart Claude Desktop after saving. See [MCP docs](https://modelcontextprotocol
 - `vO2_max` - VO2 max data
 
 ## Available Tools
-For date-based resources, use tools like `get_daily_sleep` with `startDate` and `endDate` parameters (YYYY-MM-DD). 
+For date-based resources, use tools like `get_daily_sleep` with `startDate` and `endDate` parameters (YYYY-MM-DD).
+
+## API Rate Limits
+
+### Oura API Limits
+The Oura API enforces the following rate limits:
+- **5,000 requests per 5 minutes**
+- Rate limit applies per access token
+- Exceeding this limit results in `429 Too Many Requests` errors
+
+### Handling Rate Limits
+
+#### HTTP 429 Response
+When you exceed the rate limit, the API returns:
+```json
+{
+  "status": 429,
+  "message": "Request Rate Limit Exceeded"
+}
+```
+
+#### Best Practices
+
+1. **Implement Exponential Backoff**
+```typescript
+async function fetchWithRetry(fn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error.message.includes('429') && i < maxRetries - 1) {
+        const delay = Math.pow(2, i) * 1000; // 1s, 2s, 4s
+        console.log(`Rate limited. Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+```
+
+2. **Batch Requests Efficiently**
+   - Fetch data for date ranges instead of individual days
+   - Use the widest date range your application needs
+   - Example: `startDate: '2024-01-01', endDate: '2024-01-31'` (1 request for 31 days)
+
+3. **Cache API Responses**
+   - Store fetched data locally
+   - Implement cache expiration based on your needs
+   - Avoid redundant requests for the same data
+
+4. **Monitor Usage**
+   - Track requests per time window
+   - Implement request throttling if approaching limits
+   - Log rate limit errors for monitoring
+
+5. **Contact Oura for Higher Limits**
+   - If your application requires >5,000 requests per 5 minutes
+   - Email: [api-support@ouraring.com](mailto:api-support@ouraring.com)
+   - Provide use case and expected volume
+
+### Rate Limit Headers
+The Oura API may include these headers in responses:
+- `X-RateLimit-Limit`: Maximum requests allowed
+- `X-RateLimit-Remaining`: Requests remaining in current window
+- `X-RateLimit-Reset`: Time when the rate limit resets (Unix timestamp)
+
+**Note**: Check response headers to implement proactive throttling. 
