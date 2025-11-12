@@ -24,15 +24,51 @@ npm run build
    - [OAuth2 Credentials](https://cloud.ouraring.com/oauth/applications) (for production)
 
 ### Environment Variables
-Create a `.env` file:
-```
-# Option 1: Personal Access Token
-OURA_PERSONAL_ACCESS_TOKEN=your_token
 
-# Option 2: OAuth2 credentials
+#### Option 1: Personal Access Token (Recommended for Testing)
+Create a `.env` file:
+```bash
+OURA_PERSONAL_ACCESS_TOKEN=your_token
+```
+
+This is the simplest method for testing and personal use. The token works immediately without any additional steps.
+
+#### Option 2: OAuth2 (Required for Multi-User Applications)
+Create a `.env` file:
+```bash
 OURA_CLIENT_ID=your_client_id
 OURA_CLIENT_SECRET=your_client_secret
 OURA_REDIRECT_URI=http://localhost:3000/callback
+```
+
+**OAuth Flow Steps:**
+1. Initialize the provider with OAuth credentials
+2. Call `auth.getAuthorizationUrl(['personal', 'daily'])` to get authorization URL
+3. Direct users to this URL where they grant permissions
+4. Oura redirects back to your `REDIRECT_URI` with an authorization code
+5. Call `auth.exchangeCodeForTokens(code)` to exchange the code for access tokens
+6. Tokens are automatically refreshed when they expire
+
+**Example OAuth Implementation:**
+```typescript
+import { OuraProvider } from './provider/oura_provider.js';
+
+const provider = new OuraProvider({
+  clientId: process.env.OURA_CLIENT_ID,
+  clientSecret: process.env.OURA_CLIENT_SECRET,
+  redirectUri: process.env.OURA_REDIRECT_URI
+});
+
+// Step 1: Get authorization URL
+const authUrl = provider.getAuthorizationUrl(['personal', 'daily']);
+console.log('Visit this URL to authorize:', authUrl);
+
+// Step 2: After user authorizes and you receive the code:
+await provider.exchangeCodeForTokens(authorizationCode);
+
+// Step 3: Now you can use the provider
+const server = provider.getServer();
+await server.connect(transport);
 ```
 
 ## Usage

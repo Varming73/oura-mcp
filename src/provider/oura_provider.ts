@@ -184,4 +184,45 @@ export class OuraProvider {
   getServer(): McpServer {
     return this.server;
   }
+
+  /**
+   * Gets the OAuth authorization URL for users to visit.
+   * Only available when using OAuth credentials (not Personal Access Token).
+   *
+   * @param scopes - Array of OAuth scopes to request (default: ['personal', 'daily'])
+   * @returns Authorization URL string
+   * @throws Error if using Personal Access Token
+   */
+  getAuthorizationUrl(scopes?: string[]): string {
+    return this.auth.getAuthorizationUrl(scopes);
+  }
+
+  /**
+   * Exchanges an OAuth authorization code for access and refresh tokens.
+   * Only available when using OAuth credentials (not Personal Access Token).
+   *
+   * @param code - Authorization code from OAuth redirect
+   * @throws Error if using Personal Access Token or if exchange fails
+   */
+  async exchangeCodeForTokens(code: string): Promise<void> {
+    await this.auth.exchangeCodeForTokens(code);
+  }
+
+  /**
+   * Checks if the provider is using OAuth authentication.
+   *
+   * @returns true if using OAuth, false if using Personal Access Token
+   */
+  isUsingOAuth(): boolean {
+    return this.auth.isUsingOAuth();
+  }
+
+  /**
+   * Checks if OAuth tokens are currently valid.
+   *
+   * @returns true if OAuth tokens are present and valid, false otherwise
+   */
+  hasValidOAuthTokens(): boolean {
+    return this.auth.hasValidOAuthTokens();
+  }
 } 
