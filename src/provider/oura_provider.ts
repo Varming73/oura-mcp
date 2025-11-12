@@ -23,20 +23,42 @@ export class OuraProvider {
 
     this.server = new McpServer({
       name: "oura-provider",
-      version: "1.0.0"
+      version: "1.0.0",
+      capabilities: {
+        resources: {},
+        tools: {}
+      }
     });
 
     this.initializeResources();
   }
 
+  private validateDateFormat(date: string): boolean {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date)) {
+      return false;
+    }
+    const parsedDate = new Date(date);
+    return parsedDate instanceof Date && !isNaN(parsedDate.getTime());
+  }
+
+  private validateDateRange(startDate: string, endDate: string): void {
+    if (!this.validateDateFormat(startDate)) {
+      throw new Error(`Invalid start date format: ${startDate}. Expected YYYY-MM-DD format.`);
+    }
+    if (!this.validateDateFormat(endDate)) {
+      throw new Error(`Invalid end date format: ${endDate}. Expected YYYY-MM-DD format.`);
+    }
+    if (new Date(startDate) > new Date(endDate)) {
+      throw new Error(`Start date (${startDate}) must be before or equal to end date (${endDate}).`);
+    }
+  }
+
   private async fetchOuraData(endpoint: string, params?: Record<string, string>): Promise<any> {
     const headers = await this.auth.getHeaders();
     const url = new URL(`${this.auth.getBaseUrl()}/usercollection/${endpoint}`);
-    
+
     if (params) {
-      // Log the incoming date parameters
-      console.log(`Fetching ${endpoint} with dates:`, params);
-      
       Object.entries(params).forEach(([key, value]) => {
         url.searchParams.append(key, value);
       });
@@ -45,49 +67,51 @@ export class OuraProvider {
     const response = await fetch(url.toString(), { headers });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch ${endpoint}: ${response.statusText}`);
+      const errorBody = await response.text().catch(() => 'Unable to read error response');
+      throw new Error(
+        `Failed to fetch ${endpoint}: ${response.status} ${response.statusText}. ${errorBody}`
+      );
     }
 
-    const data = await response.json();
-    // Log the response data dates
-    if (data.data && data.data.length > 0) {
-      console.log(`Response data for ${endpoint}:`, data.data.map((d: { day?: string; timestamp?: string }) => d.day || d.timestamp));
-    }
-    return data;
+    return await response.json();
   }
 
   private initializeResources(): void {
-    // Define the date range schema for tools
+    // Define the date range schema for tools with descriptions
     const dateRangeSchema = {
-      startDate: z.string(),
-      endDate: z.string()
+      startDate: z.string().describe('Start date in YYYY-MM-DD format (e.g., 2024-01-01)'),
+      endDate: z.string().describe('End date in YYYY-MM-DD format (e.g., 2024-01-31)')
     };
 
     // Add resources and tools for each endpoint
     const endpoints = [
-      { name: 'personal_info', requiresDates: false },
-      { name: 'daily_activity', requiresDates: true },
-      { name: 'daily_readiness', requiresDates: true },
-      { name: 'daily_sleep', requiresDates: true },
-      { name: 'sleep', requiresDates: true },
-      { name: 'sleep_time', requiresDates: true },
-      { name: 'workout', requiresDates: true },
-      { name: 'session', requiresDates: true },
-      { name: 'daily_spo2', requiresDates: true },
-      { name: 'rest_mode_period', requiresDates: true },
-      { name: 'ring_configuration', requiresDates: false },
-      { name: 'daily_stress', requiresDates: true },
-      { name: 'daily_resilience', requiresDates: true },
-      { name: 'daily_cardiovascular_age', requiresDates: true },
-      { name: 'vO2_max', requiresDates: true }
+      { name: 'personal_info', requiresDates: false, description: 'User profile information including age, weight, height, and biological sex' },
+      { name: 'daily_activity', requiresDates: true, description: 'Daily activity summaries including steps, calories, and active time' },
+      { name: 'daily_readiness', requiresDates: true, description: 'Daily readiness scores and contributing factors' },
+      { name: 'daily_sleep', requiresDates: true, description: 'Daily sleep summaries including duration, efficiency, and sleep stages' },
+      { name: 'sleep', requiresDates: true, description: 'Detailed sleep data with per-minute heart rate and HRV measurements' },
+      { name: 'sleep_time', requiresDates: true, description: 'Sleep timing data including bedtime and wake time recommendations' },
+      { name: 'workout', requiresDates: true, description: 'Workout session data including intensity, duration, and heart rate zones' },
+      { name: 'session', requiresDates: true, description: 'Tagged session data for activities like meditation or breathing exercises' },
+      { name: 'daily_spo2', requiresDates: true, description: 'Daily blood oxygen saturation (SpO2) measurements' },
+      { name: 'rest_mode_period', requiresDates: true, description: 'Rest mode periods when user has paused activity tracking' },
+      { name: 'ring_configuration', requiresDates: false, description: 'Ring hardware configuration and settings' },
+      { name: 'daily_stress', requiresDates: true, description: 'Daily stress levels and daytime stress measurements' },
+      { name: 'daily_resilience', requiresDates: true, description: 'Daily resilience metrics reflecting recovery capacity' },
+      { name: 'daily_cardiovascular_age', requiresDates: true, description: 'Daily cardiovascular age estimates based on fitness data' },
+      { name: 'vO2_max', requiresDates: true, description: 'VO2 max measurements indicating cardiovascular fitness level' }
     ];
 
     // Add resources
-    endpoints.forEach(({ name, requiresDates }) => {
+    endpoints.forEach(({ name, requiresDates, description }) => {
       this.server.resource(
         name,
         `oura://${name}`,
-        async (uri) => {
+        {
+          description,
+          mimeType: 'application/json'
+        },
+        async (uri: URL) => {
           let data;
           if (requiresDates) {
             // For date-based resources, fetch last 7 days by default
@@ -101,7 +125,8 @@ export class OuraProvider {
           return {
             contents: [{
               uri: uri.href,
-              text: JSON.stringify(data, null, 2)
+              text: JSON.stringify(data, null, 2),
+              mimeType: 'application/json'
             }]
           };
         }
@@ -109,11 +134,15 @@ export class OuraProvider {
     });
 
     // Add tools
-    endpoints.filter(e => e.requiresDates).forEach(({ name }) => {
+    endpoints.filter(e => e.requiresDates).forEach(({ name, description }) => {
       this.server.tool(
         `get_${name}`,
+        `Retrieves ${description.toLowerCase()} for a specified date range from Oura Ring API`,
         dateRangeSchema,
-        async ({ startDate, endDate }) => {
+        async ({ startDate, endDate }: { startDate: string; endDate: string }) => {
+          // Validate date inputs
+          this.validateDateRange(startDate, endDate);
+
           const data = await this.fetchOuraData(name, {
             start_date: startDate,
             end_date: endDate
